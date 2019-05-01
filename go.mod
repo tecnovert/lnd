@@ -34,6 +34,8 @@ require (
 	github.com/lightningnetwork/lnd/ticker v1.0.0
 	github.com/ltcsuite/ltcd v0.0.0-20190101042124-f37f8bf35796
 	github.com/miekg/dns v0.0.0-20171125082028-79bfde677fa8
+	github.com/particl/partsuite_partd v0.0.0-20180219184348-ae651ccc8293
+	github.com/pkg/errors v0.8.1
 	github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af // indirect
 	github.com/tv42/zbase32 v0.0.0-20160707012821-501572607d02
 	github.com/urfave/cli v1.18.0
@@ -51,3 +53,9 @@ require (
 replace github.com/lightningnetwork/lnd/ticker => ./ticker
 
 replace github.com/lightningnetwork/lnd/queue => ./queue
+
+replace github.com/btcsuite/btcd => github.com/tecnovert/btcd v0.0.0-20190501153232-32f603439381
+
+replace github.com/btcsuite/btcutil => github.com/tecnovert/btcutil v0.0.0-20190430081832-7dc54cfcc1ec
+
+replace github.com/btcsuite/btcwallet => github.com/tecnovert/btcwallet v0.0.0-20190501152413-a567c41292eb

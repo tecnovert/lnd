@@ -246,6 +246,10 @@ func CraftSweepAllTx(feeRate lnwallet.SatPerKWeight, blockHeight uint32,
 		case txscript.IsPayToScriptHash(pkScript):
 			witnessType = input.NestedWitnessKeyHash
 
+		// Particl Hack
+		case txscript.IsPayToPubKeyHash(pkScript):
+			witnessType = input.WitnessKeyHash
+
 		// All other output types we count as unknown and will fail to
 		// sweep.
 		default:

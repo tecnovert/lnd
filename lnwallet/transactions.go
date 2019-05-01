@@ -50,7 +50,8 @@ func createHtlcSuccessTx(htlcOutput wire.OutPoint, htlcAmt btcutil.Amount,
 
 	// Create a version two transaction (as the success version of this
 	// spends an output with a CSV timeout).
-	successTx := wire.NewMsgTx(2)
+	//successTx := wire.NewMsgTx(2)
+	successTx := wire.NewMsgTx(wire.ParticlTxVersion) // TODO
 
 	// The input to the transaction is the outpoint that creates the
 	// original HTLC on the sender's commitment transaction.
@@ -104,7 +105,8 @@ func createHtlcTimeoutTx(htlcOutput wire.OutPoint, htlcAmt btcutil.Amount,
 	// Create a version two transaction (as the success version of this
 	// spends an output with a CSV timeout), and set the lock-time to the
 	// specified absolute lock-time in blocks.
-	timeoutTx := wire.NewMsgTx(2)
+	//timeoutTx := wire.NewMsgTx(2)
+	timeoutTx := wire.NewMsgTx(wire.ParticlTxVersion) // TODO
 	timeoutTx.LockTime = cltvExpiry
 
 	// The input to the transaction is the outpoint that creates the

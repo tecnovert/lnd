@@ -23,9 +23,23 @@ var (
 	SequenceLockTimeSeconds = uint32(1 << 22)
 )
 
+// Particl256BitScriptHash generates a pay-to-script-hash public key script
+func Particl256BitScriptHash(witnessScript []byte) ([]byte, error) {
+	bldr := txscript.NewScriptBuilder()
+
+	bldr.AddOp(txscript.OP_SHA256)
+	scriptHash := sha256.Sum256(witnessScript)
+	bldr.AddData(scriptHash[:])
+	bldr.AddOp(txscript.OP_EQUAL)
+	return bldr.Script()
+}
+
 // WitnessScriptHash generates a pay-to-witness-script-hash public key script
 // paying to a version 0 witness program paying to the passed redeem script.
 func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
+	// Particl Hack: Split per coin
+	return Particl256BitScriptHash(witnessScript)
+
 	bldr := txscript.NewScriptBuilder()
 
 	bldr.AddOp(txscript.OP_0)
@@ -834,10 +848,19 @@ func CommitScriptToSelf(csvTimeout uint32, selfKey, revokeKey *btcec.PublicKey) 
 func CommitScriptUnencumbered(key *btcec.PublicKey) ([]byte, error) {
 	// This script goes to the "other" party, and it spendable immediately.
 	builder := txscript.NewScriptBuilder()
+
+	// Particl
+	builder.AddOp(txscript.OP_DUP)
+	builder.AddOp(txscript.OP_HASH160)
+	builder.AddData(btcutil.Hash160(key.SerializeCompressed()))
+	builder.AddOp(txscript.OP_EQUALVERIFY)
+	builder.AddOp(txscript.OP_CHECKSIG)
+	return builder.Script()
+	/*
 	builder.AddOp(txscript.OP_0)
 	builder.AddData(btcutil.Hash160(key.SerializeCompressed()))
 
-	return builder.Script()
+	*/
 }
 
 // CommitSpendTimeout constructs a valid witness allowing the owner of a

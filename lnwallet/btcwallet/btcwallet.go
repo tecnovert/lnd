@@ -378,6 +378,9 @@ func (b *BtcWallet) ListUnspentWitness(minConfs, maxConfs int32) (
 		}
 
 		var addressType lnwallet.AddressType
+		if b.cfg.NetParams == &chaincfg.ParticlMainNetParams || b.cfg.NetParams == &chaincfg.ParticlTestNetParams || b.cfg.NetParams == &chaincfg.ParticlRegressionNetParams {
+			addressType = lnwallet.WitnessPubKey
+		} else
 		if txscript.IsPayToWitnessPubKeyHash(pkScript) {
 			addressType = lnwallet.WitnessPubKey
 		} else if txscript.IsPayToScriptHash(pkScript) {

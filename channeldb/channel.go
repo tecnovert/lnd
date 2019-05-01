@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
@@ -223,6 +224,10 @@ type ChannelConfig struct {
 	// from the per-commitment point) is used within the "to self" clause
 	// within any HTLC output scripts.
 	HtlcBasePoint keychain.KeyDescriptor
+
+	// NetParams is the set of parameters that tells the wallet which chain
+	// it will be operating on.
+	NetParams chaincfg.Params
 }
 
 // ChannelCommitment is a snapshot of the commitment state at a particular

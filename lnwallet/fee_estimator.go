@@ -11,7 +11,8 @@ import (
 const (
 	// FeePerKwFloor is the lowest fee rate in sat/kw that we should use for
 	// determining transaction fees.
-	FeePerKwFloor SatPerKWeight = 253
+	//FeePerKwFloor SatPerKWeight = 253
+	FeePerKwFloor SatPerKWeight = 2530 // Raise for Particl
 )
 
 // SatPerKVByte represents a fee rate in sat/kb.

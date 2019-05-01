@@ -45,6 +45,12 @@ const (
 	defaultLitecoinTimeLockDelta = 576
 	defaultLitecoinDustLimit     = btcutil.Amount(54600)
 
+	defaultParticlMinHTLCMSat   = lnwire.MilliSatoshi(1000)
+	defaultParticlBaseFeeMSat   = lnwire.MilliSatoshi(1000)
+	defaultParticlFeeRate       = lnwire.MilliSatoshi(1)
+	defaultParticlTimeLockDelta = 576
+	defaultParticlDustLimit     = btcutil.Amount(54600)
+
 	// defaultBitcoinStaticFeePerKW is the fee rate of 50 sat/vbyte
 	// expressed in sat/kw.
 	defaultBitcoinStaticFeePerKW = lnwallet.SatPerKWeight(12500)
@@ -53,9 +59,17 @@ const (
 	// expressed in sat/kw.
 	defaultLitecoinStaticFeePerKW = lnwallet.SatPerKWeight(50000)
 
+	// defaultLitecoinStaticFeePerKW is the fee rate of 200 sat/vbyte
+	// expressed in sat/kw.
+	defaultParticlStaticFeePerKW = lnwallet.SatPerKWeight(50000)
+
 	// btcToLtcConversionRate is a fixed ratio used in order to scale up
 	// payments when running on the Litecoin chain.
 	btcToLtcConversionRate = 60
+
+	// btcToPartConversionRate is a fixed ratio used in order to scale up
+	// payments when running on the Particl chain.
+	btcToPartConversionRate = 60
 )
 
 // defaultBtcChannelConstraints is the default set of channel constraints that are
@@ -84,6 +98,9 @@ const (
 
 	// litecoinChain is Litecoin's testnet chain.
 	litecoinChain
+
+	// particlChain is Particl's testnet chain.
+	particlChain
 )
 
 // String returns a string representation of the target chainCode.
@@ -93,6 +110,8 @@ func (c chainCode) String() string {
 		return "bitcoin"
 	case litecoinChain:
 		return "litecoin"
+	case particlChain:
+		return "particl"
 	default:
 		return "kekcoin"
 	}
@@ -139,6 +158,9 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 	homeChainConfig := cfg.Bitcoin
 	if registeredChains.PrimaryChain() == litecoinChain {
 		homeChainConfig = cfg.Litecoin
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		homeChainConfig = cfg.Particl
 	}
 	ltndLog.Infof("Primary chain is set to: %v",
 		registeredChains.PrimaryChain())
@@ -165,6 +187,16 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 		}
 		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
 			defaultLitecoinStaticFeePerKW, 0,
+		)
+	case particlChain:
+		cc.routingPolicy = htlcswitch.ForwardingPolicy{
+			MinHTLC:       cfg.Particl.MinHTLC,
+			BaseFee:       cfg.Particl.BaseFee,
+			FeeRate:       cfg.Particl.FeeRate,
+			TimeLockDelta: cfg.Particl.TimeLockDelta,
+		}
+		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
+			defaultParticlStaticFeePerKW, 0,
 		)
 	default:
 		return nil, nil, fmt.Errorf("Default routing policy for "+
@@ -215,13 +247,15 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			activeNetParams.Params, neutrinoCS,
 		)
 
-	case "bitcoind", "litecoind":
+	case "bitcoind", "litecoind", "particld":
 		var bitcoindMode *bitcoindConfig
 		switch {
 		case cfg.Bitcoin.Active:
 			bitcoindMode = cfg.BitcoindMode
 		case cfg.Litecoin.Active:
 			bitcoindMode = cfg.LitecoindMode
+		case cfg.Particl.Active:
+			bitcoindMode = cfg.ParticldMode
 		}
 		// Otherwise, we'll be speaking directly via RPC and ZMQ to a
 		// bitcoind node. If the specified host for the btcd/ltcd RPC
@@ -324,8 +358,25 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			if err := cc.feeEstimator.Start(); err != nil {
 				return nil, nil, err
 			}
+		} else if cfg.Particl.Active {
+			ltndLog.Infof("Initializing particld backed fee estimator")
+
+			// Finally, we'll re-initialize the fee estimator, as
+			// if we're using particld as a backend, then we can
+			// use live fee estimates, rather than a statically
+			// coded value.
+			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = lnwallet.NewBitcoindFeeEstimator(
+				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := cc.feeEstimator.Start(); err != nil {
+				return nil, nil, err
+			}
 		}
-	case "btcd", "ltcd":
+	case "btcd", "ltcd", "partd":
 		// Otherwise, we'll be speaking directly via RPC to a node.
 		//
 		// So first we'll load btcd/ltcd's TLS cert for the RPC
@@ -338,6 +389,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			btcdMode = cfg.BtcdMode
 		case cfg.Litecoin.Active:
 			btcdMode = cfg.LtcdMode
+		case cfg.Particl.Active:
+			return nil, nil, fmt.Errorf("partd not supported.")
 		}
 		var rpcCert []byte
 		if btcdMode.RawRPCCert != "" {
@@ -531,6 +584,31 @@ var (
 		0x59, 0x40, 0xfd, 0x1f, 0xe3, 0x65, 0xa7, 0x12,
 	})
 
+	// particlMainnetGenesis is the genesis hash of Particl's main chain.
+	particlMainnetGenesis = chainhash.Hash([chainhash.HashSize]byte{
+		0x4c, 0xcf, 0xec, 0x66, 0x68, 0xd6, 0x24, 0xb9,
+		0x0b, 0x8e, 0x99, 0xc3, 0x5d, 0x82, 0xb8, 0xc7,
+		0xb8, 0xdd, 0x2f, 0xe2, 0x23, 0x56, 0xc9, 0x7a,
+		0x31, 0x95, 0xc1, 0x84, 0x07, 0xee, 0x00, 0x00,
+	})
+
+	// particlTestnetGenesis is the genesis hash of Particl's testnet
+	// chain.
+	particlTestnetGenesis = chainhash.Hash([chainhash.HashSize]byte{
+		0x90, 0x7c, 0xec, 0xa7, 0x04, 0xa9, 0xd6, 0xc7,
+		0xcd, 0x33, 0x4e, 0xea, 0x50, 0x58, 0xbd, 0x0b,
+		0x3d, 0xfa, 0xd4, 0xaf, 0xe0, 0x3e, 0x44, 0x67,
+		0xb3, 0x10, 0x53, 0xda, 0x4a, 0x59, 0x00, 0x00,
+	})
+
+	// particlRegTestGenesis is the genesis hash of Particl's main chain.
+	particlRegtestGenesis = chainhash.Hash([chainhash.HashSize]byte{
+		0x07, 0x59, 0xf2, 0x98, 0x70, 0x86, 0x66, 0xf8,
+		0x4c, 0xe2, 0x2e, 0x6f, 0x58, 0xf6, 0xff, 0x08,
+		0xe5, 0x8a, 0xb9, 0x16, 0xde, 0x8f, 0x3b, 0xfa,
+		0x5b, 0xda, 0x0a, 0x6c, 0x53, 0x74, 0xd1, 0x6c,
+	})
+
 	// chainMap is a simple index that maps a chain's genesis hash to the
 	// chainCode enum for that chain.
 	chainMap = map[chainhash.Hash]chainCode{
@@ -539,6 +617,10 @@ var (
 
 		bitcoinMainnetGenesis:  bitcoinChain,
 		litecoinMainnetGenesis: litecoinChain,
+
+		particlMainnetGenesis: particlChain,
+		particlTestnetGenesis: particlChain,
+		particlRegtestGenesis: particlChain,
 	}
 
 	// chainDNSSeeds is a map of a chain's hash to the set of DNS seeds
@@ -571,6 +653,20 @@ var (
 		litecoinMainnetGenesis: {
 			{
 				"ltc.nodes.lightning.directory",
+				"soa.nodes.lightning.directory",
+			},
+		},
+
+		particlMainnetGenesis: {
+			{
+				"part.nodes.lightning.directory",
+				"soa.nodes.lightning.directory",
+			},
+		},
+
+		particlTestnetGenesis: {
+			{
+				"part_test.nodes.lightning.directory",
 				"soa.nodes.lightning.directory",
 			},
 		},

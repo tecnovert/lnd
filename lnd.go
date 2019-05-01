@@ -113,16 +113,16 @@ func lndMain() error {
 
 	var network string
 	switch {
-	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3:
+	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3  || cfg.Particl.TestNet3:
 		network = "testnet"
 
-	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet:
+	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet || cfg.Particl.MainNet:
 		network = "mainnet"
 
 	case cfg.Bitcoin.SimNet:
 		network = "simnet"
 
-	case cfg.Bitcoin.RegTest:
+	case cfg.Bitcoin.RegTest || cfg.Particl.RegTest:
 		network = "regtest"
 	}
 
@@ -193,6 +193,9 @@ func lndMain() error {
 	mainChain := cfg.Bitcoin
 	if registeredChains.PrimaryChain() == litecoinChain {
 		mainChain = cfg.Litecoin
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		mainChain = cfg.Particl
 	}
 	var neutrinoCS *neutrino.ChainService
 	if mainChain.Node == "neutrino" {
@@ -731,6 +734,9 @@ func waitForWalletPassword(grpcEndpoints, restEndpoints []net.Addr,
 	chainConfig := cfg.Bitcoin
 	if registeredChains.PrimaryChain() == litecoinChain {
 		chainConfig = cfg.Litecoin
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		chainConfig = cfg.Particl
 	}
 
 	// The macaroon files are passed to the wallet unlocker since they are
