@@ -13,6 +13,10 @@ const (
 	// LitecoinNetwork denotes that an HTLC is to be forwarded along the
 	// Litecoin link with the specified short channel ID.
 	LitecoinNetwork
+
+	// ParticlNetwork denotes that an HTLC is to be forwarded along the
+	// Particl link with the specified short channel ID.
+	ParticlNetwork
 )
 
 // String returns the string representation of the target Network.
@@ -22,6 +26,8 @@ func (c Network) String() string {
 		return "Bitcoin"
 	case LitecoinNetwork:
 		return "Litecoin"
+	case ParticlNetwork:
+		return "Particl"
 	default:
 		return "Kekcoin"
 	}

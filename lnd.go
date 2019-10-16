@@ -136,16 +136,16 @@ func Main(lisCfg ListenerCfg) error {
 
 	var network string
 	switch {
-	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3:
+	case cfg.Bitcoin.TestNet3 || cfg.Litecoin.TestNet3 || cfg.Particl.TestNet3:
 		network = "testnet"
 
-	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet:
+	case cfg.Bitcoin.MainNet || cfg.Litecoin.MainNet || cfg.Particl.MainNet:
 		network = "mainnet"
 
-	case cfg.Bitcoin.SimNet || cfg.Litecoin.SimNet:
+	case cfg.Bitcoin.SimNet || cfg.Litecoin.SimNet || cfg.Particl.SimNet:
 		network = "simnet"
 
-	case cfg.Bitcoin.RegTest || cfg.Litecoin.RegTest:
+	case cfg.Bitcoin.RegTest || cfg.Litecoin.RegTest || cfg.Particl.RegTest:
 		network = "regtest"
 	}
 
@@ -233,6 +233,9 @@ func Main(lisCfg ListenerCfg) error {
 	mainChain := cfg.Bitcoin
 	if registeredChains.PrimaryChain() == litecoinChain {
 		mainChain = cfg.Litecoin
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		mainChain = cfg.Particl
 	}
 	var neutrinoCS *neutrino.ChainService
 	if mainChain.Node == "neutrino" {
@@ -570,7 +573,8 @@ func Main(lisCfg ListenerCfg) error {
 	// ensures that we don't accept any possibly invalid state transitions, or
 	// accept channels with spent funds.
 	if !(cfg.Bitcoin.RegTest || cfg.Bitcoin.SimNet ||
-		cfg.Litecoin.RegTest || cfg.Litecoin.SimNet) {
+		cfg.Litecoin.RegTest || cfg.Litecoin.SimNet ||
+		cfg.Particl.RegTest || cfg.Particl.SimNet) {
 
 		_, bestHeight, err := activeChainControl.chainIO.GetBestBlock()
 		if err != nil {
@@ -990,6 +994,9 @@ func waitForWalletPassword(restEndpoints []net.Addr,
 	chainConfig := cfg.Bitcoin
 	if registeredChains.PrimaryChain() == litecoinChain {
 		chainConfig = cfg.Litecoin
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		chainConfig = cfg.Particl
 	}
 
 	// The macaroon files are passed to the wallet unlocker since they are

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -106,6 +107,8 @@ type BreachConfig struct {
 	// breached channels. This is used in conjunction with DB to recover
 	// from crashes, restarts, or other failures.
 	Store RetributionStore
+
+	NetParams *chaincfg.Params
 }
 
 // breachArbiter is a special subsystem which is responsible for watching and
@@ -1120,9 +1123,13 @@ func (b *breachArbiter) sweepSpendableOutputsTxn(txWeight int64,
 	// TODO(roasbeef): already start to siphon their funds into fees
 	sweepAmt := int64(totalAmt - txFee)
 
+	txVersion := int32(2)
+	if b.cfg.NetParams.CoinName == "particl" {
+		txVersion = wire.ParticlTxVersion
+	}
 	// With the fee calculated, we can now create the transaction using the
 	// information gathered above and the provided retribution information.
-	txn := wire.NewMsgTx(2)
+	txn := wire.NewMsgTx(txVersion)
 
 	// We begin by adding the output to which our funds will be deposited.
 	txn.AddTxOut(&wire.TxOut{

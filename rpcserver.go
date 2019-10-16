@@ -69,6 +69,11 @@ const (
 	// permitted.
 	maxLtcPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
 		btcToLtcConversionRate
+
+	// maxPartPaymentMSat is the maximum allowed Particl payment currently
+	// permitted.
+	maxPartPaymentMSat = lnwire.MilliSatoshi(math.MaxUint32) *
+		btcToPartConversionRate
 )
 
 var (
@@ -3442,6 +3447,9 @@ func (r *rpcServer) AddInvoice(ctx context.Context,
 	defaultDelta := cfg.Bitcoin.TimeLockDelta
 	if registeredChains.PrimaryChain() == litecoinChain {
 		defaultDelta = cfg.Litecoin.TimeLockDelta
+	} else
+	if registeredChains.PrimaryChain() == particlChain {
+		defaultDelta = cfg.Particl.TimeLockDelta
 	}
 
 	addInvoiceCfg := &invoicesrpc.AddInvoiceConfig{

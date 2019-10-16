@@ -2438,7 +2438,7 @@ func (lc *LightningChannel) createCommitmentTx(c *commitment,
 	// Generate a new commitment transaction with all the latest
 	// unsettled/un-timed out HTLCs.
 	commitTx, err := CreateCommitTx(lc.fundingTxIn(), keyRing, delay,
-		delayBalance, p2wkhBalance, c.dustLimit)
+		delayBalance, p2wkhBalance, c.dustLimit, "particl") // Particl TODO: Pass coin type
 	if err != nil {
 		return err
 	}
@@ -6132,7 +6132,7 @@ func (lc *LightningChannel) generateRevocation(height uint64) (*lnwire.RevokeAnd
 // counterparty within the channel, which can be spent immediately.
 func CreateCommitTx(fundingOutput wire.TxIn,
 	keyRing *CommitmentKeyRing, csvTimeout uint32,
-	amountToSelf, amountToThem, dustLimit btcutil.Amount) (*wire.MsgTx, error) {
+	amountToSelf, amountToThem, dustLimit btcutil.Amount, CoinName string) (*wire.MsgTx, error) {
 
 	// First, we create the script for the delayed "pay-to-self" output.
 	// This output has 2 main redemption clauses: either we can redeem the
@@ -6159,7 +6159,11 @@ func CreateCommitTx(fundingOutput wire.TxIn,
 	// Now that both output scripts have been created, we can finally create
 	// the transaction itself. We use a transaction version of 2 since CSV
 	// will fail unless the tx version is >= 2.
-	commitTx := wire.NewMsgTx(2)
+    txVersion := int32(2)
+	if CoinName == "particl" {
+		txVersion = wire.ParticlTxVersion
+	}
+	commitTx := wire.NewMsgTx(txVersion)
 	commitTx.AddTxIn(&fundingOutput)
 
 	// Avoid creating dust outputs within the commitment transaction.
@@ -6194,7 +6198,7 @@ func CreateCooperativeCloseTx(fundingTxIn wire.TxIn,
 	// channel. In the event that one side doesn't have any settled funds
 	// within the channel then a refund output for that particular side can
 	// be omitted.
-	closeTx := wire.NewMsgTx(2)
+	closeTx := wire.NewMsgTx(wire.ParticlTxVersion) // Particl TODO: Pass coin type
 	closeTx.AddTxIn(&fundingTxIn)
 
 	// Create both cooperative closure outputs, properly respecting the

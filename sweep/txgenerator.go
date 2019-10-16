@@ -191,7 +191,8 @@ func createSweepTx(inputs []input.Input, outputPkScript []byte,
 	// Create the sweep transaction that we will be building. We use
 	// version 2 as it is required for CSV. The txn will sweep the amount
 	// after fees to the pkscript generated above.
-	sweepTx := wire.NewMsgTx(2)
+	//sweepTx := wire.NewMsgTx(2)
+	sweepTx := wire.NewMsgTx(wire.ParticlTxVersion) // TODO
 	sweepTx.AddTxOut(&wire.TxOut{
 		PkScript: outputPkScript,
 		Value:    sweepAmt,

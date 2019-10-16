@@ -155,7 +155,8 @@ func (p *JusticeDescriptor) commitToRemoteInput() (*breachedInput, error) {
 func (p *JusticeDescriptor) assembleJusticeTxn(txWeight int64,
 	inputs ...*breachedInput) (*wire.MsgTx, error) {
 
-	justiceTxn := wire.NewMsgTx(2)
+	//justiceTxn := wire.NewMsgTx(2)
+	justiceTxn := wire.NewMsgTx(wire.ParticlTxVersion) // TODO
 
 	// First, construct add the breached inputs to our justice transaction
 	// and compute the total amount that will be swept.

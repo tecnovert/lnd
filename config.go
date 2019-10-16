@@ -148,6 +148,7 @@ var (
 
 	defaultBitcoindDir  = btcutil.AppDataDir("bitcoin", false)
 	defaultLitecoindDir = btcutil.AppDataDir("litecoin", false)
+    defaultParticldDir = btcutil.AppDataDir("particl", false)
 
 	defaultTorSOCKS   = net.JoinHostPort("localhost", strconv.Itoa(defaultTorSOCKSPort))
 	defaultTorDNS     = net.JoinHostPort(defaultTorDNSHost, strconv.Itoa(defaultTorDNSPort))
@@ -158,7 +159,7 @@ type chainConfig struct {
 	Active   bool   `long:"active" description:"If the chain should be active or not."`
 	ChainDir string `long:"chaindir" description:"The directory to store the chain's data within."`
 
-	Node string `long:"node" description:"The blockchain interface to use." choice:"btcd" choice:"bitcoind" choice:"neutrino" choice:"ltcd" choice:"litecoind"`
+	Node string `long:"node" description:"The blockchain interface to use." choice:"btcd" choice:"bitcoind" choice:"neutrino" choice:"ltcd" choice:"litecoind" choice:"particld"`
 
 	MainNet  bool `long:"mainnet" description:"Use the main network"`
 	TestNet3 bool `long:"testnet" description:"Use the test network"`
@@ -285,6 +286,10 @@ type config struct {
 	LtcdMode      *btcdConfig     `group:"ltcd" namespace:"ltcd"`
 	LitecoindMode *bitcoindConfig `group:"litecoind" namespace:"litecoind"`
 
+	Particl       *chainConfig    `group:"Particl" namespace:"particl"`
+	//PartdMode     *btcdConfig     `group:"partd" namespace:"partd"`
+	ParticldMode  *bitcoindConfig `group:"particld" namespace:"particld"`
+
 	Autopilot *autoPilotConfig `group:"Autopilot" namespace:"autopilot"`
 
 	Tor *torConfig `group:"Tor" namespace:"tor"`
@@ -387,6 +392,17 @@ func loadConfig() (*config, error) {
 		},
 		LitecoindMode: &bitcoindConfig{
 			Dir:     defaultLitecoindDir,
+			RPCHost: defaultRPCHost,
+		},
+		Particl: &chainConfig{
+			MinHTLC:       defaultParticlMinHTLCMSat,
+			BaseFee:       defaultParticlBaseFeeMSat,
+			FeeRate:       defaultParticlFeeRate,
+			TimeLockDelta: defaultParticlTimeLockDelta,
+			Node:          "partd",
+		},
+		ParticldMode: &bitcoindConfig{
+			Dir:     defaultParticldDir,
 			RPCHost: defaultRPCHost,
 		},
 		MaxPendingChannels: DefaultMaxPendingChannels,
@@ -543,6 +559,7 @@ func loadConfig() (*config, error) {
 	cfg.LitecoindMode.Dir = cleanAndExpandPath(cfg.LitecoindMode.Dir)
 	cfg.Tor.PrivateKeyPath = cleanAndExpandPath(cfg.Tor.PrivateKeyPath)
 	cfg.Watchtower.TowerDir = cleanAndExpandPath(cfg.Watchtower.TowerDir)
+	cfg.ParticldMode.Dir = cleanAndExpandPath(cfg.ParticldMode.Dir)
 
 	// Ensure that the user didn't attempt to specify negative values for
 	// any of the autopilot params.
@@ -683,11 +700,21 @@ func loadConfig() (*config, error) {
 			"active together"
 		return nil, fmt.Errorf(str, funcName)
 
+	case cfg.Particl.Active && cfg.Bitcoin.Active:
+		str := "%s: Currently both Bitcoin and Particl cannot be " +
+			"active together"
+		return nil, fmt.Errorf(str, funcName)
+
+	case cfg.Particl.Active && cfg.Litecoin.Active:
+		str := "%s: Currently both Litecoin and Particl cannot be " +
+			"active together"
+		return nil, fmt.Errorf(str, funcName)
+
 	// Either Bitcoin must be active, or Litecoin must be active.
 	// Otherwise, we don't know which chain we're on.
-	case !cfg.Bitcoin.Active && !cfg.Litecoin.Active:
-		return nil, fmt.Errorf("%s: either bitcoin.active or "+
-			"litecoin.active must be set to 1 (true)", funcName)
+	case !cfg.Bitcoin.Active && !cfg.Litecoin.Active && !cfg.Particl.Active:
+		return nil, fmt.Errorf("%s: either bitcoin.active, "+
+			"litecoin.active or particl.active must be set to 1 (true)", funcName)
 
 	case cfg.Litecoin.Active:
 		if cfg.Litecoin.TimeLockDelta < minTimeLockDelta {
@@ -775,6 +802,84 @@ func loadConfig() (*config, error) {
 		registeredChains.RegisterPrimaryChain(litecoinChain)
 		MaxFundingAmount = maxLtcFundingAmount
 		MaxPaymentMSat = maxLtcPaymentMSat
+
+	case cfg.Particl.Active:
+		if cfg.Particl.SimNet {
+			str := "%s: simnet mode for particl not currently supported"
+			return nil, fmt.Errorf(str, funcName)
+		}
+
+		if cfg.Particl.TimeLockDelta < minTimeLockDelta {
+			return nil, fmt.Errorf("timelockdelta must be at least %v",
+				minTimeLockDelta)
+		}
+
+		// Multiple networks can't be selected simultaneously.  Count
+		// number of network flags passed; assign active network params
+		// while we're at it.
+		numNets := 0
+		var partParams particlNetParams
+		if cfg.Particl.MainNet {
+			numNets++
+			partParams = particlMainNetParams
+		}
+		if cfg.Particl.TestNet3 {
+			numNets++
+			partParams = particlTestNetParams
+		}
+		if cfg.Particl.RegTest {
+			numNets++
+			partParams = particlRegTestNetParams
+		}
+		if numNets > 1 {
+			str := "%s: The mainnet, testnet, and simnet params " +
+				"can't be used together -- choose one of the " +
+				"three"
+			err := fmt.Errorf(str, funcName)
+			return nil, err
+		}
+
+		// The target network must be provided, otherwise, we won't
+		// know how to initialize the daemon.
+		if numNets == 0 {
+			str := "%s: either --particl.mainnet, or " +
+				"particl.testnet must be specified"
+			err := fmt.Errorf(str, funcName)
+			return nil, err
+		}
+
+		// The particl chain is the current active chain. However
+		// throughout the codebase we required chaincfg.Params. So as a
+		// temporary hack, we'll mutate the default net params for
+		// bitcoin with the particl specific information.
+		applyParticlParams(&activeNetParams, &partParams)
+
+		switch cfg.Particl.Node {
+		case "particld":
+			if cfg.Particl.SimNet {
+				return nil, fmt.Errorf("%s: particld does not "+
+					"support simnet", funcName)
+			}
+			err := parseRPCParams(cfg.Particl, cfg.ParticldMode,
+				particlChain, funcName)
+			if err != nil {
+				err := fmt.Errorf("unable to load RPC "+
+					"credentials for particld: %v", err)
+				return nil, err
+			}
+		default:
+			str := "%s: only particld mode supported for " +
+				"particl at this time"
+			return nil, fmt.Errorf(str, funcName)
+		}
+
+		cfg.Particl.ChainDir = filepath.Join(cfg.DataDir,
+			defaultChainSubDirname,
+			particlChain.String())
+
+		// Finally we'll register the particl chain as our current
+		// primary chain.
+		registeredChains.RegisterPrimaryChain(particlChain)
 
 	case cfg.Bitcoin.Active:
 		// Multiple networks can't be selected simultaneously.  Count
@@ -1289,6 +1394,10 @@ func parseRPCParams(cConfig *chainConfig, nodeConfig interface{}, net chainCode,
 			daemonName = "litecoind"
 			confDir = conf.Dir
 			confFile = "litecoin"
+		case particlChain:
+			daemonName = "particld"
+			confDir = conf.Dir
+			confFile = "particl"
 		}
 
 		// If not all of the parameters are set, we'll assume the user
@@ -1325,7 +1434,7 @@ func parseRPCParams(cConfig *chainConfig, nodeConfig interface{}, net chainCode,
 				err)
 		}
 		nConf.RPCUser, nConf.RPCPass = rpcUser, rpcPass
-	case "bitcoind", "litecoind":
+	case "bitcoind", "litecoind", "particld":
 		nConf := nodeConfig.(*bitcoindConfig)
 		rpcUser, rpcPass, zmqBlockHost, zmqTxHost, err :=
 			extractBitcoindRPCParams(confFile)
@@ -1451,6 +1560,8 @@ func extractBitcoindRPCParams(bitcoindConfigPath string) (string, string, string
 
 	chainDir := "/"
 	switch activeNetParams.Params.Name {
+	case "testnet":
+		chainDir = "/testnet/"
 	case "testnet3":
 		chainDir = "/testnet3/"
 	case "testnet4":

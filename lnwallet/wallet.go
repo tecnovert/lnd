@@ -675,7 +675,7 @@ func CreateCommitmentTxns(localBalance, remoteBalance btcutil.Amount,
 
 	ourCommitTx, err := CreateCommitTx(fundingTxIn, localCommitmentKeys,
 		uint32(ourChanCfg.CsvDelay), localBalance, remoteBalance,
-		ourChanCfg.DustLimit)
+		ourChanCfg.DustLimit, ourChanCfg.NetParams.CoinName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -687,7 +687,7 @@ func CreateCommitmentTxns(localBalance, remoteBalance btcutil.Amount,
 
 	theirCommitTx, err := CreateCommitTx(fundingTxIn, remoteCommitmentKeys,
 		uint32(theirChanCfg.CsvDelay), remoteBalance, localBalance,
-		theirChanCfg.DustLimit)
+		theirChanCfg.DustLimit, theirChanCfg.NetParams.CoinName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -721,7 +721,11 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 
 	// Create a blank, fresh transaction. Soon to be a complete funding
 	// transaction which will allow opening a lightning channel.
-	pendingReservation.fundingTx = wire.NewMsgTx(1)
+	txVersion := int32(1)
+	if l.Cfg.NetParams.CoinName == "particl" {
+		txVersion = wire.ParticlTxVersion
+	}
+	pendingReservation.fundingTx = wire.NewMsgTx(txVersion)
 	fundingTx := pendingReservation.fundingTx
 
 	// Some temporary variables to cut down on the resolution verbosity.
@@ -834,6 +838,10 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 			Index: multiSigIndex,
 		},
 	}
+
+	// Particl Hack: Send chain detail through to CreateCommitTx
+	ourContribution.ChannelConfig.NetParams = l.Cfg.NetParams
+	theirContribution.ChannelConfig.NetParams = l.Cfg.NetParams
 
 	// With the funding tx complete, create both commitment transactions.
 	localBalance := pendingReservation.partialState.LocalCommitment.LocalBalance.ToSatoshis()
@@ -1158,6 +1166,10 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 	chanState := pendingReservation.partialState
 	chanState.FundingOutpoint = *req.fundingOutpoint
 	fundingTxIn := wire.NewTxIn(req.fundingOutpoint, nil, nil)
+
+	// Particl Hack: Send chain detail through to CreateCommitTx
+	pendingReservation.ourContribution.ChannelConfig.NetParams = l.Cfg.NetParams
+	pendingReservation.theirContribution.ChannelConfig.NetParams = l.Cfg.NetParams
 
 	// Now that we have the funding outpoint, we can generate both versions
 	// of the commitment transaction, and generate a signature for the

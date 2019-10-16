@@ -205,7 +205,8 @@ func (t *backupTask) craftSessionPayload(
 
 	// Now, begin construction of the justice transaction. We'll start with
 	// a version 2 transaction.
-	justiceTxn := wire.NewMsgTx(2)
+	//justiceTxn := wire.NewMsgTx(2)
+	justiceTxn := wire.NewMsgTx(wire.ParticlTxVersion) // TODO
 
 	// Next, add the non-dust inputs that were derived from the breach
 	// information. This will either be contain both the to-local and
