@@ -40,6 +40,7 @@ import (
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/btcwallet"
+	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 	"github.com/lightningnetwork/lnd/lnwire"
 )
 
@@ -166,7 +167,7 @@ func newPkScript(t *testing.T, w *lnwallet.LightningWallet,
 // parties to send on-chain funds to each other.
 func sendCoins(t *testing.T, miner *rpctest.Harness,
 	sender, receiver *lnwallet.LightningWallet, output *wire.TxOut,
-	feeRate lnwallet.SatPerKWeight) *wire.MsgTx {
+	feeRate chainfee.SatPerKWeight) *wire.MsgTx { //nolint:unparam
 
 	t.Helper()
 
@@ -330,7 +331,7 @@ func createTestWallet(tempTestDir string, miningNode *rpctest.Harness,
 		WalletController: wc,
 		Signer:           signer,
 		ChainIO:          bio,
-		FeeEstimator:     lnwallet.NewStaticFeeEstimator(2500, 0),
+		FeeEstimator:     chainfee.NewStaticEstimator(2500, 0),
 		DefaultConstraints: channeldb.ChannelConstraints{
 			DustLimit:        500,
 			MaxPendingAmount: lnwire.NewMSatFromSatoshis(btcutil.SatoshiPerBitcoin) * 100,
@@ -511,7 +512,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 	if !bytes.Equal(aliceChannels[0].FundingOutpoint.Hash[:], fundingSha[:]) {
 		t.Fatalf("channel state not properly saved")
 	}
-	if aliceChannels[0].ChanType != channeldb.DualFunder {
+	if !aliceChannels[0].ChanType.IsDualFunder() {
 		t.Fatalf("channel not detected as dual funder")
 	}
 	bobChannels, err := bob.Cfg.Database.FetchOpenChannels(alicePub)
@@ -521,7 +522,7 @@ func testDualFundingReservationWorkflow(miner *rpctest.Harness,
 	if !bytes.Equal(bobChannels[0].FundingOutpoint.Hash[:], fundingSha[:]) {
 		t.Fatalf("channel state not properly saved")
 	}
-	if bobChannels[0].ChanType != channeldb.DualFunder {
+	if !bobChannels[0].ChanType.IsDualFunder() {
 		t.Fatalf("channel not detected as dual funder")
 	}
 
@@ -723,7 +724,7 @@ func testReservationInitiatorBalanceBelowDustCancel(miner *rpctest.Harness,
 		t.Fatalf("unable to create amt: %v", err)
 	}
 
-	feePerKw := lnwallet.SatPerKWeight(
+	feePerKw := chainfee.SatPerKWeight(
 		numBTC * numBTC * btcutil.SatoshiPerBitcoin,
 	)
 	req := &lnwallet.InitFundingReserveMsg{
@@ -971,7 +972,7 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	}
 	if !aliceChannels[0].ChanType.IsSingleFunder() {
 		t.Fatalf("channel type is incorrect, expected %v instead got %v",
-			channeldb.SingleFunder, aliceChannels[0].ChanType)
+			channeldb.SingleFunderBit, aliceChannels[0].ChanType)
 	}
 
 	bobChannels, err := bob.Cfg.Database.FetchOpenChannels(alicePub)
@@ -991,7 +992,7 @@ func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	}
 	if !bobChannels[0].ChanType.IsSingleFunder() {
 		t.Fatalf("channel type is incorrect, expected %v instead got %v",
-			channeldb.SingleFunder, bobChannels[0].ChanType)
+			channeldb.SingleFunderBit, bobChannels[0].ChanType)
 	}
 
 	// Let Alice publish the funding transaction.
@@ -1385,7 +1386,7 @@ func testTransactionSubscriptions(miner *rpctest.Harness,
 	// notifications when we _create_ transactions ourselves that spend our
 	// own outputs.
 	b := txscript.NewScriptBuilder()
-	b.AddOp(txscript.OP_0)
+	b.AddOp(txscript.OP_RETURN)
 	outputScript, err := b.Script()
 	if err != nil {
 		t.Fatalf("unable to make output script: %v", err)
@@ -1594,7 +1595,7 @@ func newTx(t *testing.T, r *rpctest.Harness, pubKey *btcec.PublicKey,
 	}
 
 	// Create a new unconfirmed tx that spends this output.
-	txFee := btcutil.Amount(0.1 * btcutil.SatoshiPerBitcoin)
+	txFee := btcutil.Amount(0.001 * btcutil.SatoshiPerBitcoin)
 	tx1, err := txFromOutput(
 		tx, alice.Cfg.Signer, pubKey, pubKey, txFee, rbf,
 	)
@@ -1671,7 +1672,7 @@ func testPublishTransaction(r *rpctest.Harness,
 	// We'll do the next mempool check on both RBF and non-RBF enabled
 	// transactions.
 	var (
-		txFee         = btcutil.Amount(0.05 * btcutil.SatoshiPerBitcoin)
+		txFee         = btcutil.Amount(0.005 * btcutil.SatoshiPerBitcoin)
 		tx3, tx3Spend *wire.MsgTx
 	)
 
@@ -2151,7 +2152,7 @@ func testChangeOutputSpendConfirmation(r *rpctest.Harness,
 	//
 	// TODO(wilmer): replace this once SendOutputs easily supports sending
 	// all funds in one transaction.
-	txFeeRate := lnwallet.SatPerKWeight(2500)
+	txFeeRate := chainfee.SatPerKWeight(2500)
 	txFee := btcutil.Amount(14380)
 	output := &wire.TxOut{
 		Value:    int64(aliceBalance - txFee),
@@ -2247,7 +2248,7 @@ func testLastUnusedAddr(miner *rpctest.Harness,
 		if err != nil {
 			t.Fatalf("unable to convert addr to script: %v", err)
 		}
-		feeRate := lnwallet.SatPerKWeight(2500)
+		feeRate := chainfee.SatPerKWeight(2500)
 		output := &wire.TxOut{
 			Value:    1000000,
 			PkScript: addrScript,
@@ -2281,7 +2282,7 @@ func testCreateSimpleTx(r *rpctest.Harness, w *lnwallet.LightningWallet,
 	// The test cases we will run through for all backends.
 	testCases := []struct {
 		outVals []int64
-		feeRate lnwallet.SatPerKWeight
+		feeRate chainfee.SatPerKWeight
 		valid   bool
 	}{
 		{

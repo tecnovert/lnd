@@ -10,6 +10,9 @@ run:
   skip-files:
     - "mobile\\/.*generated\\.go"
 
+  skip-dirs:
+    - channeldb/migration_01_to_11
+
   build-tags:
     - autopilotrpc
     - chainrpc
@@ -54,6 +57,9 @@ linters:
   # Instances of table driven tests that don't pre-allocate shouldn't trigger
   # the linter.
   - prealloc
+
+  # Init functions are used by loggers throughout the codebase.
+  - gochecknoinits
 
 issues:
   # Only show newly introduced problems.

@@ -1,0 +1,48 @@
+version: "3"
+services:
+    particld:
+        container_name: lnd_particld
+        image: tecnovert/particl:0.18.1.5
+        environment:
+            PARTICL_NETWORK: ${NETWORK:-regtest}
+            PARTICL_EXTRA_ARGS: |
+                rpcport=43782
+                rpcbind=0.0.0.0:43782
+                port=51738
+                whitelist=0.0.0.0/0
+        expose:
+        - "43782"
+        - "51738"
+        volumes:
+        - "particl_datadir:/data"
+    lnd:
+        image: lnd
+        build:
+          context: ../../
+          dockerfile: docker/particl/lnd/Dockerfile
+        environment:
+          - RPCUSER
+          - RPCPASS
+          - NETWORK
+          - CHAIN
+          - DEBUG
+        volumes:
+          - shared:/rpc
+          - lnd:/root/.lnd
+        entrypoint: ["./start-lnd.sh"]
+
+volumes:
+  # shared volume is need to store the btcd rpc certificates and use it within
+  # btcctl and lnd containers.
+  shared:
+    driver: local
+
+  # particl volume is needed for maintaining blockchain persistence
+  particl_datadir:
+    driver: local
+
+  # lnd volume is used for persisting lnd application data and chain state
+  # during container lifecycle.
+  lnd:
+    driver: local
+

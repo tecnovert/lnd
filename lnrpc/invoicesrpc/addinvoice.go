@@ -57,10 +57,6 @@ type AddInvoiceData struct {
 	// description_hash field is not being used.
 	Memo string
 
-	// Deprecated. An optional cryptographic receipt of payment which is not
-	// implemented.
-	Receipt []byte
-
 	// The preimage which will allow settling an incoming HTLC payable to
 	// this preimage. If Preimage is set, Hash should be nil. If both
 	// Preimage and Hash are nil, a random preimage is generated.
@@ -71,8 +67,8 @@ type AddInvoiceData struct {
 	// htlc will be accepted and held until the preimage becomes known.
 	Hash *lntypes.Hash
 
-	// The value of this invoice in satoshis.
-	Value btcutil.Amount
+	// The value of this invoice in millisatoshis.
+	Value lnwire.MilliSatoshi
 
 	// Hash (SHA-256) of a description of the payment. Used if the
 	// description of payment (memo) is too long to naturally fit within the
@@ -154,10 +150,6 @@ func AddInvoice(ctx context.Context, cfg *AddInvoiceConfig,
 		return nil, nil, fmt.Errorf("memo too large: %v bytes "+
 			"(maxsize=%v)", len(invoice.Memo), channeldb.MaxMemoSize)
 	}
-	if len(invoice.Receipt) > channeldb.MaxReceiptSize {
-		return nil, nil, fmt.Errorf("receipt too large: %v bytes "+
-			"(maxsize=%v)", len(invoice.Receipt), channeldb.MaxReceiptSize)
-	}
 	if len(invoice.DescriptionHash) > 0 && len(invoice.DescriptionHash) != 32 {
 		return nil, nil, fmt.Errorf("description hash is %v bytes, must be 32",
 			len(invoice.DescriptionHash))
@@ -169,7 +161,7 @@ func AddInvoice(ctx context.Context, cfg *AddInvoiceConfig,
 			"are not allowed, value is %v", invoice.Value)
 	}
 
-	amtMSat := lnwire.NewMSatFromSatoshis(invoice.Value)
+	amtMSat := invoice.Value
 
 	// The value of the invoice must also not exceed the current soft-limit
 	// on the largest payment within the network.
@@ -371,6 +363,13 @@ func AddInvoice(ctx context.Context, cfg *AddInvoiceConfig,
 
 	}
 
+	// Set a blank feature vector, as our invoice generation forbids nil
+	// features.
+	invoiceFeatures := lnwire.NewFeatureVector(
+		lnwire.NewRawFeatureVector(), lnwire.Features,
+	)
+	options = append(options, zpay32.Features(invoiceFeatures))
+
 	// Create and encode the payment request as a bech32 (zpay32) string.
 	creationDate := time.Now()
 	payReq, err := zpay32.NewInvoice(
@@ -392,13 +391,13 @@ func AddInvoice(ctx context.Context, cfg *AddInvoiceConfig,
 	newInvoice := &channeldb.Invoice{
 		CreationDate:   creationDate,
 		Memo:           []byte(invoice.Memo),
-		Receipt:        invoice.Receipt,
 		PaymentRequest: []byte(payReqString),
-		FinalCltvDelta: int32(payReq.MinFinalCLTVExpiry()),
-		Expiry:         payReq.Expiry(),
 		Terms: channeldb.ContractTerm{
+			FinalCltvDelta:  int32(payReq.MinFinalCLTVExpiry()),
+			Expiry:          payReq.Expiry(),
 			Value:           amtMSat,
 			PaymentPreimage: paymentPreimage,
+			Features:        invoiceFeatures,
 		},
 	}
 

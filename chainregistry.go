@@ -30,6 +30,7 @@ import (
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/btcwallet"
+	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/routing/chainview"
 )
@@ -55,11 +56,11 @@ const (
 
 	// defaultBitcoinStaticFeePerKW is the fee rate of 50 sat/vbyte
 	// expressed in sat/kw.
-	defaultBitcoinStaticFeePerKW = lnwallet.SatPerKWeight(12500)
+	defaultBitcoinStaticFeePerKW = chainfee.SatPerKWeight(12500)
 
 	// defaultLitecoinStaticFeePerKW is the fee rate of 200 sat/vbyte
 	// expressed in sat/kw.
-	defaultLitecoinStaticFeePerKW = lnwallet.SatPerKWeight(50000)
+	defaultLitecoinStaticFeePerKW = chainfee.SatPerKWeight(50000)
 
 	// btcToLtcConversionRate is a fixed ratio used in order to scale up
 	// payments when running on the Litecoin chain.
@@ -72,7 +73,7 @@ const (
 	defaultParticlDustLimit     = btcutil.Amount(54600)
 	// defaultLitecoinStaticFeePerKW is the fee rate of 200 sat/vbyte
 	// expressed in sat/kw.
-	defaultParticlStaticFeePerKW = lnwallet.SatPerKWeight(50000)
+	defaultParticlStaticFeePerKW = chainfee.SatPerKWeight(50000)
 	// btcToPartConversionRate is a fixed ratio used in order to scale up
 	// payments when running on the Particl chain.
 	btcToPartConversionRate = 60
@@ -129,7 +130,7 @@ func (c chainCode) String() string {
 type chainControl struct {
 	chainIO lnwallet.BlockChainIO
 
-	feeEstimator lnwallet.FeeEstimator
+	feeEstimator chainfee.Estimator
 
 	signer input.Signer
 
@@ -181,7 +182,7 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			FeeRate:       cfg.Bitcoin.FeeRate,
 			TimeLockDelta: cfg.Bitcoin.TimeLockDelta,
 		}
-		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
+		cc.feeEstimator = chainfee.NewStaticEstimator(
 			defaultBitcoinStaticFeePerKW, 0,
 		)
 	case litecoinChain:
@@ -191,7 +192,7 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			FeeRate:       cfg.Litecoin.FeeRate,
 			TimeLockDelta: cfg.Litecoin.TimeLockDelta,
 		}
-		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
+		cc.feeEstimator = chainfee.NewStaticEstimator(
 			defaultLitecoinStaticFeePerKW, 0,
 		)
 	case particlChain:
@@ -201,7 +202,7 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			FeeRate:       cfg.Particl.FeeRate,
 			TimeLockDelta: cfg.Particl.TimeLockDelta,
 		}
-		cc.feeEstimator = lnwallet.NewStaticFeeEstimator(
+		cc.feeEstimator = chainfee.NewStaticEstimator(
 			defaultParticlStaticFeePerKW, 0,
 		)
 	default:
@@ -249,8 +250,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 		if cfg.NeutrinoMode.FeeURL != "" {
 			ltndLog.Infof("Using API fee estimator!")
 
-			estimator := lnwallet.NewWebAPIFeeEstimator(
-				lnwallet.SparseConfFeeSource{
+			estimator := chainfee.NewWebAPIEstimator(
+				chainfee.SparseConfFeeSource{
 					URL: cfg.NeutrinoMode.FeeURL,
 				},
 				defaultBitcoinStaticFeePerKW,
@@ -355,8 +356,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			// if we're using bitcoind as a backend, then we can
 			// use live fee estimates, rather than a statically
 			// coded value.
-			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
-			cc.feeEstimator, err = lnwallet.NewBitcoindFeeEstimator(
+			fallBackFeeRate := chainfee.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = chainfee.NewBitcoindEstimator(
 				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
 			)
 			if err != nil {
@@ -372,8 +373,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			// if we're using litecoind as a backend, then we can
 			// use live fee estimates, rather than a statically
 			// coded value.
-			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
-			cc.feeEstimator, err = lnwallet.NewBitcoindFeeEstimator(
+			fallBackFeeRate := chainfee.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = chainfee.NewBitcoindEstimator(
 				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
 			)
 			if err != nil {
@@ -389,8 +390,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			// if we're using particld as a backend, then we can
 			// use live fee estimates, rather than a statically
 			// coded value.
-			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
-			cc.feeEstimator, err = lnwallet.NewBitcoindFeeEstimator(
+			fallBackFeeRate := chainfee.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = chainfee.NewBitcoindEstimator(
 				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
 			)
 			if err != nil {
@@ -496,8 +497,8 @@ func newChainControlFromConfig(cfg *config, chanDB *channeldb.DB,
 			// if we're using btcd as a backend, then we can use
 			// live fee estimates, rather than a statically coded
 			// value.
-			fallBackFeeRate := lnwallet.SatPerKVByte(25 * 1000)
-			cc.feeEstimator, err = lnwallet.NewBtcdFeeEstimator(
+			fallBackFeeRate := chainfee.SatPerKVByte(25 * 1000)
+			cc.feeEstimator, err = chainfee.NewBtcdEstimator(
 				*rpcConfig, fallBackFeeRate.FeePerKWeight(),
 			)
 			if err != nil {

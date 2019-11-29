@@ -18,6 +18,7 @@ import (
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/shachain"
 )
@@ -233,7 +234,7 @@ func CreateTestChannels(tweaklessCommits bool) (
 		return nil, nil, nil, err
 	}
 
-	estimator := NewStaticFeeEstimator(6000, 0)
+	estimator := chainfee.NewStaticEstimator(6000, 0)
 	feePerKw, err := estimator.EstimateFeePerKW(1)
 	if err != nil {
 		return nil, nil, nil, err
@@ -274,7 +275,7 @@ func CreateTestChannels(tweaklessCommits bool) (
 		IdentityPub:             aliceKeys[0].PubKey(),
 		FundingOutpoint:         *prevOut,
 		ShortChannelID:          shortChanID,
-		ChanType:                channeldb.SingleFunderTweakless,
+		ChanType:                channeldb.SingleFunderTweaklessBit,
 		IsInitiator:             true,
 		Capacity:                channelCapacity,
 		RemoteCurrentRevocation: bobCommitPoint,
@@ -292,7 +293,7 @@ func CreateTestChannels(tweaklessCommits bool) (
 		IdentityPub:             bobKeys[0].PubKey(),
 		FundingOutpoint:         *prevOut,
 		ShortChannelID:          shortChanID,
-		ChanType:                channeldb.SingleFunderTweakless,
+		ChanType:                channeldb.SingleFunderTweaklessBit,
 		IsInitiator:             false,
 		Capacity:                channelCapacity,
 		RemoteCurrentRevocation: aliceCommitPoint,
@@ -305,8 +306,8 @@ func CreateTestChannels(tweaklessCommits bool) (
 	}
 
 	if !tweaklessCommits {
-		aliceChannelState.ChanType = channeldb.SingleFunder
-		bobChannelState.ChanType = channeldb.SingleFunder
+		aliceChannelState.ChanType = channeldb.SingleFunderBit
+		bobChannelState.ChanType = channeldb.SingleFunderBit
 	}
 
 	aliceSigner := &input.MockSigner{Privkeys: aliceKeys}

@@ -533,7 +533,7 @@ func (r *ChannelRouter) Start() error {
 				PaymentHash: payment.Info.PaymentHash,
 			}
 
-			_, _, err = r.sendPayment(payment.Attempt, lPayment, paySession)
+			_, _, err := r.sendPayment(payment.Attempt, lPayment, paySession)
 			if err != nil {
 				log.Errorf("Resuming payment with hash %v "+
 					"failed: %v.", payment.Info.PaymentHash, err)
@@ -852,7 +852,6 @@ func (r *ChannelRouter) networkHandler() {
 	graphPruneTicker := time.NewTicker(r.cfg.GraphPruneInterval)
 	defer graphPruneTicker.Stop()
 
-	r.statTicker.Resume()
 	defer r.statTicker.Stop()
 
 	r.stats.Reset()
@@ -862,6 +861,12 @@ func (r *ChannelRouter) networkHandler() {
 	validationBarrier := NewValidationBarrier(runtime.NumCPU()*4, r.quit)
 
 	for {
+
+		// If there are stats, resume the statTicker.
+		if !r.stats.Empty() {
+			r.statTicker.Resume()
+		}
+
 		select {
 		// A new fully validated network update has just arrived. As a
 		// result we'll modify the channel graph accordingly depending
@@ -1344,8 +1349,6 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 		return errors.Errorf("wrong routing update message type")
 	}
 
-	r.statTicker.Resume()
-
 	return nil
 }
 
@@ -1404,7 +1407,7 @@ func (r *ChannelRouter) FindRoute(source, target route.Vertex,
 		finalCLTVDelta = finalExpiry[0]
 	}
 
-	log.Debugf("Searching for path to %x, sending %v", target, amt)
+	log.Debugf("Searching for path to %v, sending %v", target, amt)
 
 	// We can short circuit the routing by opportunistically checking to
 	// see if the target vertex event exists in the current graph.
@@ -1592,6 +1595,10 @@ type LightningPayment struct {
 	// OutgoingChannelID is the channel that needs to be taken to the first
 	// hop. If nil, any channel may be used.
 	OutgoingChannelID *uint64
+
+	// LastHop is the pubkey of the last node before the final destination
+	// is reached. If nil, any node may be used.
+	LastHop *route.Vertex
 
 	// PaymentRequest is an optional payment request that this payment is
 	// attempting to complete.
@@ -1847,7 +1854,7 @@ func (r *ChannelRouter) tryApplyChannelUpdate(rt *route.Route,
 
 	// Apply channel update.
 	if !r.applyChannelUpdate(update, errSource) {
-		log.Debugf("Invalid channel update received: node=%x",
+		log.Debugf("Invalid channel update received: node=%v",
 			errVertex)
 	}
 
@@ -2254,90 +2261,6 @@ func generateBandwidthHints(sourceNode *channeldb.LightningNode,
 	return bandwidthHints, nil
 }
 
-// runningAmounts keeps running amounts while the route is traversed.
-type runningAmounts struct {
-	// amt is the intended amount to send via the route.
-	amt lnwire.MilliSatoshi
-
-	// max is the running maximum that the route can carry.
-	max lnwire.MilliSatoshi
-}
-
-// prependChannel returns a new set of running amounts that would result from
-// prepending the given channel to the route. If canIncreaseAmt is set, the
-// amount may be increased if it is too small to satisfy the channel's minimum
-// htlc amount.
-func (r *runningAmounts) prependChannel(policy *channeldb.ChannelEdgePolicy,
-	capacity btcutil.Amount, localChan bool, canIncreaseAmt bool) (
-	runningAmounts, error) {
-
-	// Determine max htlc value.
-	maxHtlc := lnwire.NewMSatFromSatoshis(capacity)
-	if policy.MessageFlags.HasMaxHtlc() {
-		maxHtlc = policy.MaxHTLC
-	}
-
-	amt := r.amt
-
-	// If we have a specific amount for which we are building the route,
-	// validate it against the channel constraints and return the new
-	// running amount.
-	if !canIncreaseAmt {
-		if amt < policy.MinHTLC || amt > maxHtlc {
-			return runningAmounts{}, fmt.Errorf("channel htlc "+
-				"constraints [%v - %v] violated with amt %v",
-				policy.MinHTLC, maxHtlc, amt)
-		}
-
-		// Update running amount by adding the fee for non-local
-		// channels.
-		if !localChan {
-			amt += policy.ComputeFee(amt)
-		}
-
-		return runningAmounts{
-			amt: amt,
-		}, nil
-	}
-
-	// Adapt the minimum amount to what this channel allows.
-	if policy.MinHTLC > r.amt {
-		amt = policy.MinHTLC
-	}
-
-	// Update the maximum amount too to be able to detect incompatible
-	// channels.
-	max := r.max
-	if maxHtlc < r.max {
-		max = maxHtlc
-	}
-
-	// If we get in the situation that the minimum amount exceeds the
-	// maximum amount (enforced further down stream), we have incompatible
-	// channel policies.
-	//
-	// There is possibility with pubkey addressing that we should have
-	// selected a different channel downstream, but we don't backtrack to
-	// try to fix that. It would complicate path finding while we expect
-	// this situation to be rare. The spec recommends to keep all policies
-	// towards a peer identical. If that is the case, there isn't a better
-	// channel that we should have selected.
-	if amt > max {
-		return runningAmounts{},
-			fmt.Errorf("incompatible channel policies: %v "+
-				"exceeds %v", amt, max)
-	}
-
-	// Add fees to the running amounts. Skip the source node fees as
-	// those do not need to be paid.
-	if !localChan {
-		amt += policy.ComputeFee(amt)
-		max += policy.ComputeFee(max)
-	}
-
-	return runningAmounts{amt: amt, max: max}, nil
-}
-
 // ErrNoChannel is returned when a route cannot be built because there are no
 // channels that satisfy all requirements.
 type ErrNoChannel struct {
@@ -2374,24 +2297,21 @@ func (r *ChannelRouter) BuildRoute(amt *lnwire.MilliSatoshi,
 		return nil, err
 	}
 
-	// Allocate a list that will contain the selected channels for this
+	// Allocate a list that will contain the unified policies for this
 	// route.
-	edges := make([]*channeldb.ChannelEdgePolicy, len(hops))
+	edges := make([]*unifiedPolicy, len(hops))
 
-	// Keep a running amount and the maximum for this route.
-	amts := runningAmounts{
-		max: lnwire.MilliSatoshi(^uint64(0)),
-	}
+	var runningAmt lnwire.MilliSatoshi
 	if useMinAmt {
 		// For minimum amount routes, aim to deliver at least 1 msat to
 		// the destination. There are nodes in the wild that have a
 		// min_htlc channel policy of zero, which could lead to a zero
 		// amount payment being made.
-		amts.amt = 1
+		runningAmt = 1
 	} else {
 		// If an amount is specified, we need to build a route that
 		// delivers exactly this amount to the final destination.
-		amts.amt = *amt
+		runningAmt = *amt
 	}
 
 	// Traverse hops backwards to accumulate fees in the running amounts.
@@ -2408,142 +2328,85 @@ func (r *ChannelRouter) BuildRoute(amt *lnwire.MilliSatoshi,
 
 		localChan := i == 0
 
-		// Iterate over candidate channels to select the channel
-		// to use for the final route.
-		var (
-			bestEdge      *channeldb.ChannelEdgePolicy
-			bestAmts      *runningAmounts
-			bestBandwidth lnwire.MilliSatoshi
-		)
+		// Build unified policies for this hop based on the channels
+		// known in the graph.
+		u := newUnifiedPolicies(source, toNode, outgoingChan)
 
-		cb := func(tx *bbolt.Tx,
-			edgeInfo *channeldb.ChannelEdgeInfo,
-			_, inEdge *channeldb.ChannelEdgePolicy) error {
-
-			chanID := edgeInfo.ChannelID
-
-			// Apply outgoing channel restriction is active.
-			if localChan && outgoingChan != nil &&
-				chanID != *outgoingChan {
-
-				return nil
-			}
-
-			// No unknown policy channels.
-			if inEdge == nil {
-				return nil
-			}
-
-			// Before we can process the edge, we'll need to
-			// fetch the node on the _other_ end of this
-			// channel as we may later need to iterate over
-			// the incoming edges of this node if we explore
-			// it further.
-			chanFromNode, err := edgeInfo.FetchOtherNode(
-				tx, toNode[:],
-			)
-			if err != nil {
-				return err
-			}
-
-			// Continue searching if this channel doesn't
-			// connect with the previous hop.
-			if chanFromNode.PubKeyBytes != fromNode {
-				return nil
-			}
-
-			// Validate whether this channel's policy is satisfied
-			// and obtain the new running amounts if this channel
-			// was to be selected.
-			newAmts, err := amts.prependChannel(
-				inEdge, edgeInfo.Capacity, localChan,
-				useMinAmt,
-			)
-			if err != nil {
-				log.Tracef("Skipping chan %v: %v",
-					inEdge.ChannelID, err)
-
-				return nil
-			}
-
-			// If we already have a best edge, check whether this
-			// edge is better.
-			bandwidth := bandwidthHints[chanID]
-			if bestEdge != nil {
-				if localChan {
-					// For local channels, better is defined
-					// as having more bandwidth. We try to
-					// maximize the chance that the returned
-					// route succeeds.
-					if bandwidth < bestBandwidth {
-						return nil
-					}
-				} else {
-					// For other channels, better is defined
-					// as lower fees for the amount to send.
-					// Normally all channels between two
-					// nodes should have the same policy,
-					// but in case not we minimize our cost
-					// here. Regular path finding would do
-					// the same.
-					if newAmts.amt > bestAmts.amt {
-						return nil
-					}
-				}
-			}
-
-			// If we get here, the current edge is better. Replace
-			// the best.
-			bestEdge = inEdge
-			bestAmts = &newAmts
-			bestBandwidth = bandwidth
-
-			return nil
-		}
-
-		err := r.cfg.Graph.ForEachNodeChannel(nil, toNode[:], cb)
+		err := u.addGraphPolicies(r.cfg.Graph, nil)
 		if err != nil {
 			return nil, err
 		}
 
-		// There is no matching channel. Stop building the route here.
-		if bestEdge == nil {
+		// Exit if there are no channels.
+		unifiedPolicy, ok := u.policies[fromNode]
+		if !ok {
 			return nil, ErrNoChannel{
 				fromNode: fromNode,
 				position: i,
 			}
 		}
 
-		log.Tracef("Select channel %v at position %v", bestEdge.ChannelID, i)
+		// If using min amt, increase amt if needed.
+		if useMinAmt {
+			min := unifiedPolicy.minAmt()
+			if min > runningAmt {
+				runningAmt = min
+			}
+		}
 
-		edges[i] = bestEdge
-		amts = *bestAmts
+		// Get a forwarding policy for the specific amount that we want
+		// to forward.
+		policy := unifiedPolicy.getPolicy(runningAmt, bandwidthHints)
+		if policy == nil {
+			return nil, ErrNoChannel{
+				fromNode: fromNode,
+				position: i,
+			}
+		}
+
+		// Add fee for this hop.
+		if !localChan {
+			runningAmt += policy.ComputeFee(runningAmt)
+		}
+
+		log.Tracef("Select channel %v at position %v", policy.ChannelID, i)
+
+		edges[i] = unifiedPolicy
 	}
 
+	// Now that we arrived at the start of the route and found out the route
+	// total amount, we make a forward pass. Because the amount may have
+	// been increased in the backward pass, fees need to be recalculated and
+	// amount ranges re-checked.
+	var pathEdges []*channeldb.ChannelEdgePolicy
+	receiverAmt := runningAmt
+	for i, edge := range edges {
+		policy := edge.getPolicy(receiverAmt, bandwidthHints)
+		if policy == nil {
+			return nil, ErrNoChannel{
+				fromNode: hops[i-1],
+				position: i,
+			}
+		}
+
+		if i > 0 {
+			// Decrease the amount to send while going forward.
+			receiverAmt -= policy.ComputeFeeFromIncoming(
+				receiverAmt,
+			)
+		}
+
+		pathEdges = append(pathEdges, policy)
+	}
+
+	// Build and return the final route.
 	_, height, err := r.cfg.Chain.GetBestBlock()
 	if err != nil {
 		return nil, err
 	}
 
-	var receiverAmt lnwire.MilliSatoshi
-	if useMinAmt {
-		// We've calculated the minimum amount for the htlc that the
-		// source node hands out. The newRoute call below expects the
-		// amount that must reach the receiver after subtraction of fees
-		// along the way. Iterate over all edges to calculate the
-		// receiver amount.
-		receiverAmt = amts.amt
-		for _, edge := range edges[1:] {
-			receiverAmt -= edge.ComputeFeeFromIncoming(receiverAmt)
-		}
-	} else {
-		// Deliver the specified amount to the receiver.
-		receiverAmt = *amt
-	}
-
-	// Build and return the final route.
 	return newRoute(
-		receiverAmt, source, edges, uint32(height),
+		receiverAmt, source, pathEdges, uint32(height),
 		uint16(finalCltvDelta), nil,
 	)
 }

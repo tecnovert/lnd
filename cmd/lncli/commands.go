@@ -24,6 +24,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
+	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/lightningnetwork/lnd/walletunlocker"
 	"github.com/urfave/cli"
 	"golang.org/x/crypto/ssh/terminal"
@@ -2040,11 +2041,18 @@ func closedChannels(ctx *cli.Context) error {
 	return nil
 }
 
-var cltvLimitFlag = cli.UintFlag{
-	Name: "cltv_limit",
-	Usage: "the maximum time lock that may be used for " +
-		"this payment",
-}
+var (
+	cltvLimitFlag = cli.UintFlag{
+		Name: "cltv_limit",
+		Usage: "the maximum time lock that may be used for " +
+			"this payment",
+	}
+
+	lastHopFlag = cli.StringFlag{
+		Name:  "last_hop",
+		Usage: "pubkey of the last hop to use for this payment",
+	}
+)
 
 // paymentFlags returns common flags for sendpayment and payinvoice.
 func paymentFlags() []cli.Flag {
@@ -2065,6 +2073,7 @@ func paymentFlags() []cli.Flag {
 				"payment",
 		},
 		cltvLimitFlag,
+		lastHopFlag,
 		cli.Uint64Flag{
 			Name: "outgoing_chan_id",
 			Usage: "short channel id of the outgoing channel to " +
@@ -2074,6 +2083,10 @@ func paymentFlags() []cli.Flag {
 		cli.BoolFlag{
 			Name:  "force, f",
 			Usage: "will skip payment request confirmation",
+		},
+		cli.BoolFlag{
+			Name:  "allow_self_payment",
+			Usage: "allow sending a circular payment to self",
 		},
 	}
 }
@@ -2281,7 +2294,19 @@ func sendPaymentRequest(ctx *cli.Context, req *lnrpc.SendRequest) error {
 	req.FeeLimit = feeLimit
 
 	req.OutgoingChanId = ctx.Uint64("outgoing_chan_id")
+	if ctx.IsSet(lastHopFlag.Name) {
+		lastHop, err := route.NewVertexFromStr(
+			ctx.String(lastHopFlag.Name),
+		)
+		if err != nil {
+			return err
+		}
+		req.LastHopPubkey = lastHop[:]
+	}
+
 	req.CltvLimit = uint32(ctx.Int(cltvLimitFlag.Name))
+
+	req.AllowSelfPayment = ctx.Bool("allow_self_payment")
 
 	amt := req.Amt
 
@@ -2562,10 +2587,6 @@ var addInvoiceCommand = cli.Command{
 				"with the invoice (default=\"\")",
 		},
 		cli.StringFlag{
-			Name:  "receipt",
-			Usage: "an optional cryptographic receipt of payment",
-		},
-		cli.StringFlag{
 			Name: "preimage",
 			Usage: "the hex-encoded preimage (32 byte) which will " +
 				"allow settling an incoming HTLC payable to this " +
@@ -2609,7 +2630,6 @@ func addInvoice(ctx *cli.Context) error {
 	var (
 		preimage []byte
 		descHash []byte
-		receipt  []byte
 		amt      int64
 		err      error
 	)
@@ -2646,14 +2666,8 @@ func addInvoice(ctx *cli.Context) error {
 		return fmt.Errorf("unable to parse description_hash: %v", err)
 	}
 
-	receipt, err = hex.DecodeString(ctx.String("receipt"))
-	if err != nil {
-		return fmt.Errorf("unable to parse receipt: %v", err)
-	}
-
 	invoice := &lnrpc.Invoice{
 		Memo:            ctx.String("memo"),
-		Receipt:         receipt,
 		RPreimage:       preimage,
 		Value:           amt,
 		DescriptionHash: descHash,
